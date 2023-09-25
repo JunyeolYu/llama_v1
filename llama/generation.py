@@ -65,7 +65,43 @@ class LLaMA:
             decoded.append(self.tokenizer.decode(t))
         return decoded
 
+    def eval(
+        self,
+        prompts: List[str],
+    ) -> List[str]:
+        bsz = len(prompts)
+        # assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
 
+        prompt_tokens = [prompt[2]+prompt[4][:-1] for prompt in prompts] # JUNYEOL: concat prompt and ending, delete last token
+        # max_prompt_size = max([len(t) for t in prompt_tokens])
+        prompt_size = [prompt[1]+prompt[-1]-1 for prompt in prompts]
+        # print(prompt_tokens)
+        tokens = torch.full((bsz, max(prompt_size)), 0, device='cuda')
+        # print(tokens.shape)
+        for k, t in enumerate(prompt_tokens):
+            tokens[k, : prompt_size[k]] = torch.tensor(t)
+
+        with torch.no_grad():
+            multi_logits = torch.nn.functional.log_softmax(self.model.forward(tokens, 0), dim=-1)#.cpu()
+
+        ### JUNYEOL ###
+        # input_ = [prompt[1]-1 for prompt in prompts]
+        # ending_ = [prompt[4] for prompt in prompts]
+        # endlen = [prompt[-1] for prompt in prompts]
+        
+        res = []
+        for logits, prompt in zip(multi_logits, prompts):
+            #logits, input, ending, el in zip(multi_logits, input_, ending_, endlen):
+            input, ending, el = prompt[1]-1, prompt[4], prompt[-1]
+            logits = logits[input:input+el].unsqueeze(0)  # [1, seq, vocab]
+            ending = torch.tensor(ending, dtype=torch.long, device='cuda').view(1,-1,1)#.unsqueeze(0).unsqueeze(-1)#.cpu()
+            answer = torch.gather(logits, 2, ending).squeeze(-1).sum()  # [1, seq]
+            res.append(answer)
+
+        for prompt, ans in zip(prompts, res):
+            prompt[3] = ans
+        return prompts
+        
 def sample_top_p(probs, p):
     probs_sort, probs_idx = torch.sort(probs, dim=-1, descending=True)
     probs_sum = torch.cumsum(probs_sort, dim=-1)

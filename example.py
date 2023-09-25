@@ -114,7 +114,7 @@ def engineering_dataset(validation_zeroshot, tokenizer):
     max_tokens_170 = []
 
     for r in requests:
-        ttt = r[1] + len(r[4])
+        ttt = r[1] + r[-1]
         if ttt <= 40:
             max_tokens_40.append(r)
         elif ttt <= 80:
@@ -124,7 +124,7 @@ def engineering_dataset(validation_zeroshot, tokenizer):
         elif ttt <= 170:
             max_tokens_170.append(r)
 
-    max_batch_sizes_config = [120, 90, 65, 40]
+    max_batch_sizes_config = [120, 90, 65, 40][::-1]
     
     print("bucket: ",len(max_tokens_40), len(max_tokens_80), len(max_tokens_120), len(max_tokens_170))
     for x,y in zip([max_tokens_40,max_tokens_80,max_tokens_120,max_tokens_170],max_batch_sizes_config[::-1]):
@@ -163,46 +163,18 @@ def main(
     validation_zeroshot = []
     final_reqs = []
     validation_zeroshot = load_hellaswag()
+    tokenizer = Tokenizer(model_path=tokenizer_path)
     final_reqs = engineering_dataset(validation_zeroshot, tokenizer)
 
     generator = load(
         ckpt_dir, tokenizer_path, local_rank, world_size, max_seq_len, max_batch_size
     )
 
-    prompts = [
-        # For these prompts, the expected answer is the natural continuation of the prompt
-        "I believe the meaning of life is",
-        "Simply put, the theory of relativity states that ",
-        "Building a website can be done in 10 simple steps:\n",
-        # Few shot prompts: https://huggingface.co/blog/few-shot-learning-gpt-neo-and-inference-api
-        """Tweet: "I hate it when my phone battery dies."
-Sentiment: Negative
-###
-Tweet: "My day has been 👍"
-Sentiment: Positive
-###
-Tweet: "This is the link to the article"
-Sentiment: Neutral
-###
-Tweet: "This new music video was incredibile"
-Sentiment:""",
-        """Translate English to French:
-
-sea otter => loutre de mer
-
-peppermint => menthe poivrée
-
-plush girafe => girafe peluche
-
-cheese =>""",
-    ]
-    results = generator.generate(
-        prompts, max_gen_len=256, temperature=temperature, top_p=top_p
-    )
-
-    for result in results:
-        print(result)
-        print("\n==================================\n")
+    res = []
+    for i in tqdm(range(len(final_reqs))):
+        results = generator.eval(final_reqs[i])
+        res.extend(results)
+    res = sorted(res, key=lambda x: x[0])
 
 
 if __name__ == "__main__":
