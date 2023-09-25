@@ -147,6 +147,44 @@ def engineering_dataset(validation_zeroshot, tokenizer):
             final_reqs.append(current_list[j:j+max_batch_sizes_config[i]])
     return final_reqs
 
+def calculate_accuracy(res):
+    acc = 0
+    nacc = 0
+
+    for r in range(0,len(res), 4):
+        try:
+            outs = sorted(res[r:r+4], key=lambda x: x[6])
+            # assert that outs order is correct
+            assert outs[0][6] == 0
+            assert outs[1][6] == 1
+            assert outs[2][6] == 2
+            assert outs[3][6] == 3
+
+            # [self.request_id,len(self.context), self.context, 0.0, ending_tok, self.label, i]
+            logs = [out[3] for out in outs]
+
+            ending_lens = [len(out[4]) for out in outs]
+            nlogs = [log/ending_lens[i] for i,log in enumerate(logs)]
+
+            pred_label = logs.index(max(logs))
+            norm_pred_label = nlogs.index(max(nlogs))
+
+            label = outs[0][5]
+
+            if pred_label == label:
+                acc += 1
+            if norm_pred_label == label:
+                nacc += 1
+        except:
+            print("Failed while calculating accuracy")
+            pass
+    
+    total_len = len(res)/4
+    acc = acc/total_len
+    nacc = nacc/total_len
+    print("Accuracy:", acc)
+    print("Normalized Accuracy:", nacc)
+
 def main(
     ckpt_dir: str,
     tokenizer_path: str,
@@ -176,6 +214,7 @@ def main(
         res.extend(results)
     res = sorted(res, key=lambda x: x[0])
 
-
+    calculate_accuracy(res)
+    
 if __name__ == "__main__":
     fire.Fire(main)
