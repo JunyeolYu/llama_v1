@@ -10,10 +10,14 @@ import time
 import json
 
 from pathlib import Path
-
 from fairscale.nn.model_parallel.initialize import initialize_model_parallel
-
 from llama import ModelArgs, Transformer, Tokenizer, LLaMA
+
+from tqdm import tqdm
+import datasets
+import numpy as np
+
+import re
 
 
 def setup_model_parallel() -> Tuple[int, int]:
@@ -62,6 +66,86 @@ def load(
     print(f"Loaded in {time.time() - start_time:.2f} seconds")
     return generator
 
+# Request Id, Length, InputData, LogProb, Ending Length, Normalized Log Prob, label
+class RequestInstance:
+    def __init__(self, request_id, activity_label, context, endings_, tokenizer, label):
+        self.request_id = request_id
+        self.activity_label = activity_label
+        self.context = context
+        self.endings = []
+        for i in range(4):
+            self.endings.append(tokenizer.encode(self.preprocess(endings_[i]), bos=True, eos=False)[1:])
+
+        self.tokenizer = tokenizer
+        self.label = label
+        self.requests = self.build_requests()
+
+    def preprocess(self,text):
+        text = text.strip()
+        text = text.replace(" [title]", ". ")
+        text = re.sub("\\[.*?\\]", "", text)
+        text = text.replace("  ", " ")
+        return text
+
+    def build_requests(self):
+        self.context = self.tokenizer.encode(self.preprocess(self.activity_label) + self.preprocess(": ") + self.preprocess(self.context), bos=True, eos=False)[1:] # delete <s> token
+        return [
+            [self.request_id,len(self.context), self.context, 0.0, ending_tok, self.label, i, len(ending_tok)] for i,ending_tok in enumerate(self.endings)
+        ]
+
+def load_hellaswag():
+    hellaswag = datasets.load_dataset('hellaswag')
+    validation = hellaswag['validation']
+    validation_zeroshot = validation.filter(lambda example: example['split_type'] == 'zeroshot')
+    print("Hellaswag dataset load finish , len: " + str(len(validation_zeroshot)))
+    return validation_zeroshot
+
+def engineering_dataset(validation_zeroshot, tokenizer):
+    requests = []
+    for i, row in tqdm(enumerate(validation_zeroshot)):
+        temp = RequestInstance(i, row['activity_label'], row['ctx'], row['endings'], tokenizer, int(row['label']))
+        requests.extend(temp.requests)
+
+    requests = sorted(requests, key=lambda x: x[1] + x[-1], reverse=True)
+
+    max_tokens_40 = []
+    max_tokens_80 = []
+    max_tokens_120 = []
+    max_tokens_170 = []
+
+    for r in requests:
+        ttt = r[1] + len(r[4])
+        if ttt <= 40:
+            max_tokens_40.append(r)
+        elif ttt <= 80:
+            max_tokens_80.append(r)
+        elif ttt <= 120:
+            max_tokens_120.append(r)
+        elif ttt <= 170:
+            max_tokens_170.append(r)
+
+    max_batch_sizes_config = [120, 90, 65, 40]
+    
+    print("bucket: ",len(max_tokens_40), len(max_tokens_80), len(max_tokens_120), len(max_tokens_170))
+    for x,y in zip([max_tokens_40,max_tokens_80,max_tokens_120,max_tokens_170],max_batch_sizes_config[::-1]):
+        print(len(x), y, len(x)/y)
+
+    final_reqs = []
+    
+    for i in range(len(max_batch_sizes_config)):
+        current_list = []
+        if i == 3:
+            current_list = max_tokens_40
+        elif i == 2:
+            current_list = max_tokens_80
+        elif i == 1:
+            current_list = max_tokens_120
+        elif i == 0:
+            current_list = max_tokens_170
+
+        for j in range(0, len(current_list), max_batch_sizes_config[i]):
+            final_reqs.append(current_list[j:j+max_batch_sizes_config[i]])
+    return final_reqs
 
 def main(
     ckpt_dir: str,
@@ -74,6 +158,12 @@ def main(
     local_rank, world_size = setup_model_parallel()
     if local_rank > 0:
         sys.stdout = open(os.devnull, "w")
+
+    # Prepare the dataset
+    validation_zeroshot = []
+    final_reqs = []
+    validation_zeroshot = load_hellaswag()
+    final_reqs = engineering_dataset(validation_zeroshot, tokenizer)
 
     generator = load(
         ckpt_dir, tokenizer_path, local_rank, world_size, max_seq_len, max_batch_size
