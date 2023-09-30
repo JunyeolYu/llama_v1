@@ -22,8 +22,12 @@ The performance of the baseline technique applied to the Hellaswag validation-ze
 - Calculating prediction class from prefill module's output
 
 ## Setup
-
-In a container with `pytorch-23.05-py3` image, run:
+Pull the image and create a container using the following command:
+```
+docker pull nvcr.io/nvidia/tritonserver:23.05-py3
+docker run --gpus all --ipc=host --ulimit memlock=-1 --ulimit stack=134217728 -v /pull/ptah/to/this/repository/:/llm -it nvcr.io/nvidia/pytorch:22.05-py3 bash
+```
+In a container, run:
 ```
 pip install -r requirements.txt
 ```
