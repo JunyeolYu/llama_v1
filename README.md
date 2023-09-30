@@ -23,7 +23,7 @@ The performance of the baseline technique applied to the Hellaswag validation-ze
 
 ## Setup
 
-In a container by `pytorch-23.05-py3` image, run:
+In a container with `pytorch-23.05-py3` image, run:
 ```
 pip install -r requirements.txt
 ```
