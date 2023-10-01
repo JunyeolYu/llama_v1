@@ -193,28 +193,49 @@ def main(
     max_seq_len: int = 512,
     max_batch_size: int = 32,
 ):
+    start_main = time.time()
     local_rank, world_size = setup_model_parallel()
     if local_rank > 0:
         sys.stdout = open(os.devnull, "w")
 
     # Prepare the dataset
+    start_dataset = time.time()
     validation_zeroshot = []
     final_reqs = []
     validation_zeroshot = load_hellaswag()
     tokenizer = Tokenizer(model_path=tokenizer_path)
     final_reqs = engineering_dataset(validation_zeroshot, tokenizer)
 
+    start_model = time.time()
     generator = load(
         ckpt_dir, tokenizer_path, local_rank, world_size, max_seq_len, max_batch_size
     )
 
+    start_eval = time.time()
     res = []
     for i in tqdm(range(len(final_reqs))):
         results = generator.eval(final_reqs[i])
         res.extend(results)
-    res = sorted(res, key=lambda x: x[0])
 
+    start_cal = time.time()
+    res = sorted(res, key=lambda x: x[0])
     calculate_accuracy(res)
+
+    end = time.time()
+
+    t_total = end - start_main
+    t_before = start_dataset - start_main
+    t_dataset = start_model - start_dataset
+    t_load = start_eval - start_model
+    t_eval = start_cal - start_eval
+    t_cal = end - start_cal
+
+    print(f"Total_time    : {t_total} s")
+    print(f"Preprocessing : {t_dataset} s")
+    print(f"Model_loading : {t_load} s")
+    print(f"Evaluation    : {t_eval} s")
+    print(f"Acc_Cal       : {t_cal} s")
+    print(f"Others        : {t_before} s")
     
 if __name__ == "__main__":
     fire.Fire(main)
