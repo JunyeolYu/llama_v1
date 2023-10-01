@@ -100,51 +100,16 @@ def load_hellaswag():
     print("Hellaswag dataset load finish , len: " + str(len(validation_zeroshot)))
     return validation_zeroshot
 
-def engineering_dataset(validation_zeroshot, tokenizer):
+def engineering_dataset(validation_zeroshot, tokenizer, max_batch_size):
     requests = []
     for i, row in tqdm(enumerate(validation_zeroshot)):
         temp = RequestInstance(i, row['activity_label'], row['ctx'], row['endings'], tokenizer, int(row['label']))
         requests.extend(temp.requests)
 
-    requests = sorted(requests, key=lambda x: x[1] + x[-1], reverse=True)
-
-    max_tokens_40 = []
-    max_tokens_80 = []
-    max_tokens_120 = []
-    max_tokens_170 = []
-
-    for r in requests:
-        ttt = r[1] + r[-1]
-        if ttt <= 40:
-            max_tokens_40.append(r)
-        elif ttt <= 80:
-            max_tokens_80.append(r)
-        elif ttt <= 120:
-            max_tokens_120.append(r)
-        elif ttt <= 170:
-            max_tokens_170.append(r)
-
-    max_batch_sizes_config = [120, 90, 65, 40][::-1]
-    
-    print("bucket: ",len(max_tokens_40), len(max_tokens_80), len(max_tokens_120), len(max_tokens_170))
-    for x,y in zip([max_tokens_40,max_tokens_80,max_tokens_120,max_tokens_170],max_batch_sizes_config[::-1]):
-        print(len(x), y, len(x)/y)
-
     final_reqs = []
-    
-    for i in range(len(max_batch_sizes_config)):
-        current_list = []
-        if i == 3:
-            current_list = max_tokens_40
-        elif i == 2:
-            current_list = max_tokens_80
-        elif i == 1:
-            current_list = max_tokens_120
-        elif i == 0:
-            current_list = max_tokens_170
+    for i in range(0, len(requests), max_batch_size):
+        final_reqs.append(requests[i:i+max_batch_size])
 
-        for j in range(0, len(current_list), max_batch_sizes_config[i]):
-            final_reqs.append(current_list[j:j+max_batch_sizes_config[i]])
     return final_reqs
 
 def calculate_accuracy(res):
@@ -190,7 +155,7 @@ def main(
     tokenizer_path: str,
     temperature: float = 0.8,
     top_p: float = 0.95,
-    max_seq_len: int = 512,
+    max_seq_len: int = 170,
     max_batch_size: int = 32,
 ):
     start_main = time.time()
@@ -204,7 +169,7 @@ def main(
     final_reqs = []
     validation_zeroshot = load_hellaswag()
     tokenizer = Tokenizer(model_path=tokenizer_path)
-    final_reqs = engineering_dataset(validation_zeroshot, tokenizer)
+    final_reqs = engineering_dataset(validation_zeroshot, tokenizer, max_batch_size)
 
     start_model = time.time()
     generator = load(
